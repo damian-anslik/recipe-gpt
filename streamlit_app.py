@@ -7,7 +7,6 @@ import json
 import dotenv
 import os
 
-chat_model = ChatOpenAI(openai_api_key=os.environ["OPENAI_API_KEY"])
 recipes_db = tinydb.TinyDB("recipes.json", indent=4)
 strings = {
     "PAGE_TITLE": "RecipeGPT",
@@ -25,6 +24,9 @@ strings = {
     "INGREDIENTS_TAB_LABEL": "🛒 Ingredients",
     "EQUIPMENT_TAB_LABEL": "🫕 Required Equipment",
 }
+
+
+# --------------------------------- Recipe generation pipeline ---------------------------------
 
 
 class RecipeOutputParser(BaseOutputParser):
@@ -78,77 +80,95 @@ def generate_recipe(prompt: str) -> dict[str, str | list[str]]:
             HumanMessage(content=prompt),
         ]
     )
-    chain = chat_prompt | chat_model | RecipeOutputParser()
-    try:
-        st.session_state["error"] = None
-        recipe = chain.invoke({"text": prompt})
-        recipes_db.insert(recipe)
-        st.session_state["active_recipe"] = recipe
-    except Exception:
-        st.session_state["error"] = strings["ERROR_MESSAGE"]
+    chain = (
+        chat_prompt
+        | ChatOpenAI(openai_api_key=os.environ["OPENAI_API_KEY"])
+        | RecipeOutputParser()
+    )
+    return chain.invoke({"text": prompt})
+
+
+# --------------------------------- Streamlit app components ---------------------------------
+
+
+def render_sidebar_prompt_section():
+    st.header(strings["SIDEBAR_TITLE"])
+    prompt = st.text_area(
+        label=strings["TEXT_AREA_LABEL"],
+        placeholder=strings["TEXT_AREA_PLACEHOLDER"],
+    )
+    if st.session_state.get("error", False):
+        st.error(strings["ERROR_MESSAGE"])
+    is_generate_button_clicked = st.button(
+        strings["GENERATE_BUTTON_LABEL"],
+        use_container_width=True,
+        disabled=(prompt == ""),
+    )
+    if is_generate_button_clicked:
+        try:
+            st.session_state.update({"error": False})
+            recipe = generate_recipe(prompt)
+            recipes_db.insert(recipe)
+            st.session_state.update({"active_recipe": recipe})
+        except Exception:
+            st.session_state.update({"error": True})
+        finally:
+            st.rerun()
+
+
+def render_sidebar_recipe_book_section(recipes: list[dict[str, str | list[str]]]):
+    st.header(strings["RECIPE_BOOK_HEADER"])
+    for recipe in recipes:
+        st.button(
+            recipe["title"],
+            on_click=lambda recipe=recipe: st.session_state.update(
+                {"active_recipe": recipe}
+            ),
+            use_container_width=True,
+        )
+
+
+def render_recipe_details_section(recipe: dict[str, str | list[str]]):
+    st.header(recipe["title"])
+    instructions_tab, ingredients_tab, equipment_tab = st.tabs(
+        [
+            strings["INSTRUCTIONS_TAB_LABEL"],
+            strings["INGREDIENTS_TAB_LABEL"],
+            strings["EQUIPMENT_TAB_LABEL"],
+        ]
+    )
+    with instructions_tab:
+        for step_num, instruction in enumerate(recipe["instructions"], start=1):
+            st.markdown(f"{step_num}. {instruction}")
+    with ingredients_tab:
+        for ingredient in recipe["ingredients"]:
+            st.markdown(f"- {ingredient}")
+    with equipment_tab:
+        for item in recipe["equipment"]:
+            st.markdown(f"- {item}")
+
+
+def render_default_recipe_details_section():
+    st.header(strings["WELCOME_HEADER"])
+    st.markdown(strings["WELCOME_DESCRIPTION"])
+    st.markdown(strings["WELCOME_FOOTER"])
 
 
 def render_app():
     recipes = recipes_db.all()
-    # State perists across app reruns, so even if the user deletes all recipes, the active recipe will still be set.
-    if len(recipes) == 0 and st.session_state.get("active_recipe") is not None:
-        st.session_state["active_recipe"] = None
     st.set_page_config(
         page_title=strings["PAGE_TITLE"],
         page_icon=strings["PAGE_ICON"],
     )
     with st.sidebar:
-        with st.container():
-            st.header(strings["SIDEBAR_TITLE"])
-            prompt = st.text_area(
-                label=strings["TEXT_AREA_LABEL"],
-                placeholder=strings["TEXT_AREA_PLACEHOLDER"],
-            )
-            if error_message := st.session_state.get("error"):
-                st.error(error_message)
-            st.button(
-                strings["GENERATE_BUTTON_LABEL"],
-                on_click=lambda: generate_recipe(prompt),
-                use_container_width=True,
-                disabled=(prompt == ""),
-            )
-        with st.container():
-            if len(recipes) != 0:
-                st.header(strings["RECIPE_BOOK_HEADER"])
-                for recipe in recipes:
-                    st.button(
-                        recipe["title"],
-                        on_click=lambda recipe=recipe: st.session_state.update(
-                            {"active_recipe": recipe}
-                        ),
-                        use_container_width=True,
-                    )
-    if st.session_state.get("active_recipe"):
-        with st.container():
-            st.header(st.session_state.get("active_recipe")["title"])
-            instructions_tab, ingredients_tab, equipment_tab = st.tabs(
-                [
-                    strings["INSTRUCTIONS_TAB_LABEL"],
-                    strings["INGREDIENTS_TAB_LABEL"],
-                    strings["EQUIPMENT_TAB_LABEL"],
-                ]
-            )
-            with instructions_tab:
-                for step_num, instruction in enumerate(
-                    st.session_state.get("active_recipe")["instructions"], start=1
-                ):
-                    st.markdown(f"{step_num}. {instruction}")
-            with ingredients_tab:
-                for ingredient in st.session_state.get("active_recipe")["ingredients"]:
-                    st.markdown(f"- {ingredient}")
-            with equipment_tab:
-                for item in st.session_state.get("active_recipe")["equipment"]:
-                    st.markdown(f"- {item}")
+        render_sidebar_prompt_section()
+        if len(recipes) > 0:
+            render_sidebar_recipe_book_section(recipes)
+    active_recipe = st.session_state.get("active_recipe", None)
+    if active_recipe and len(recipes) > 0:
+        render_recipe_details_section(active_recipe)
     else:
-        with st.container():
-            st.header(strings["WELCOME_HEADER"])
-            st.markdown(strings["WELCOME_DESCRIPTION"])
-            st.markdown(strings["WELCOME_FOOTER"])
+        render_default_recipe_details_section()
 
 
 if __name__ == "__main__":
