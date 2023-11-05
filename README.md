@@ -1,7 +1,7 @@
 ## Introduction
 
-RecipeGPT is a project that allows you to generate recipes using LLMs. The project is composed of two components, a backend API built with Flask and Langchain, and a basic front-end built with Streamlit.
+RecipeGPT is a simple project that allows users to prompt and store recipes generated using LLMs. The project is built with Langchain and Streamlit, and is powered by the OpenAI API.
 
 ## Screenshot
 
-![Screenshot of the app](/app-screenshot.png "RecipeGPT app built with Streamlit, Flask, and Langchain")
+![Screenshot of the app](/app-screenshot.png "RecipeGPT app built with Streamlit, and Langchain")
